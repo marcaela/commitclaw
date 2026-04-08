@@ -37,7 +37,7 @@ permissions:
 jobs:
   daily-develop:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # timeout-minutes: 30
 
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -262,7 +262,7 @@ jobs:
               --agent main \
               --message "$TASK" \
               --thinking low \
-              --timeout 300 \
+              --timeout 3600 \
               --json 2>&1 | tee /tmp/openclaw-output.json || true
 
             echo "::group::Agent output (attempt $ATTEMPT)"
