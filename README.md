@@ -8,10 +8,12 @@ A GitHub Actions workflow runs **once per day** (or on manual trigger) and:
 
 1. Installs [OpenClaw](https://docs.openclaw.ai) — an open-source personal AI assistant (Node.js/TypeScript)
 2. Discovers the best available **free** model on OpenRouter via `openclaw models scan`
-3. Runs the OpenClaw agent in headless mode (`openclaw agent --local`)
-4. The agent examines the repository, makes a small incremental improvement, and commits + pushes
+3. **Picks a target repository** from a configurable list (random selection when multiple are listed)
+4. Resolves the **real GitHub identity** of the PAT owner — commits look like normal developer activity
+5. Runs the OpenClaw agent in headless mode (`openclaw agent --local`) against the target repo
+6. The agent reads its **memory file** (`.openclaw/memory.md`), makes a small incremental improvement, updates memory, and commits + pushes
 
-Over time, the repository evolves through small daily changes — entirely autonomously and at zero cost.
+Over time, the repositories evolve through small daily changes — entirely autonomously and at zero cost.
 
 ## Setup
 
@@ -25,48 +27,68 @@ Over time, the repository evolves through small daily changes — entirely auton
 
 1. Go to [GitHub Settings → Developer Settings → Personal Access Tokens → Fine-grained tokens](https://github.com/settings/tokens?type=beta)
 2. Create a new token with:
-   - **Repository access**: select this repository
+   - **Repository access**: select **all repositories** you want the agent to work on
    - **Permissions**: Contents (Read and write), Metadata (Read-only)
 3. Copy the token
 
+> **Note**: commits will use the **real username and email** of the token owner, so activity looks like normal developer work — not a bot.
+
 ### 3. Add Repository Secrets
 
-In your repository, go to **Settings → Secrets and variables → Actions** and add:
+In **this** repository (where the workflow lives), go to **Settings → Secrets and variables → Actions** and add:
 
-| Secret Name         | Value                              |
-| ------------------- | ---------------------------------- |
-| `OPENROUTER_API_KEY` | Your OpenRouter API key            |
-| `GH_PAT`            | Your GitHub Personal Access Token  |
+| Type | Name | Value |
+| --- | --- | --- |
+| **Secret** | `OPENROUTER_API_KEY` | Your OpenRouter API key |
+| **Secret** | `GH_PAT` | Your GitHub Personal Access Token |
+| **Variable** | `ALLOWED_REPOS` | Comma-separated `owner/repo` list (see below) |
 
-### 4. Enable the Workflow
+### 4. Configure Target Repositories
+
+Set the **`ALLOWED_REPOS`** repository **variable** (Settings → Secrets and variables → Actions → Variables):
+
+```
+# Single repository
+myuser/my-project
+
+# Multiple repositories — one is picked at random each run
+myuser/project-a, myuser/project-b, myuser/side-project
+```
+
+If `ALLOWED_REPOS` is not set, the workflow falls back to the repository it lives in (`${{ github.repository }}`).
+
+### 5. Enable the Workflow
 
 The workflow is at [`.github/workflows/openclaw-daily.yml`](.github/workflows/openclaw-daily.yml). It runs automatically on schedule, or you can trigger it manually from the **Actions** tab.
 
 ## How It Works
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  GitHub Actions                      │
-│                                                      │
-│  schedule (daily 9 AM UTC) or manual trigger         │
-│       │                                              │
-│       ▼                                              │
-│  ┌─────────────────────────────────────────────┐     │
-│  │ 1. Install OpenClaw (npm install -g)        │     │
-│  │ 2. Scan OpenRouter free model catalog       │     │
-│  │ 3. Set best free model as primary           │     │
-│  │ 4. Run: openclaw agent --local              │     │
-│  │    └─ Agent reads repo, plans improvement   │     │
-│  │    └─ Makes changes, git commit, git push   │     │
-│  └─────────────────────────────────────────────┘     │
-│                      │                               │
-│                      ▼                               │
-│              Repository updated                      │
-└─────────────────────────────────────────────────────┘
-                       │
-                       ▼
-              OpenRouter (free models)
-              e.g., Gemini, Llama, etc.
+┌───────────────────────────────────────────────────────────┐
+│                     GitHub Actions                         │
+│                                                            │
+│  schedule (daily 9 AM UTC) or manual trigger               │
+│       │                                                    │
+│       ▼                                                    │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ 1. Resolve PAT owner → real name + email             │  │
+│  │ 2. Pick target repo (random from ALLOWED_REPOS)      │  │
+│  │ 3. Clone target repo                                 │  │
+│  │ 4. Install OpenClaw, scan free models                │  │
+│  │ 5. Run: openclaw agent --local                       │  │
+│  │    ├─ Read .openclaw/memory.md (prior context)       │  │
+│  │    ├─ Survey repo, plan improvement                  │  │
+│  │    ├─ Make changes, update memory                    │  │
+│  │    └─ git commit (real identity), git push           │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                       │                                    │
+│                       ▼                                    │
+│            Target repository updated                       │
+└───────────────────────────────────────────────────────────┘
+                        │
+                        ▼
+               OpenRouter (free models)
+               e.g., Gemini, Llama, etc.
 ```
 
 ### Key Components
@@ -79,14 +101,38 @@ The workflow is at [`.github/workflows/openclaw-daily.yml`](.github/workflows/op
 | **`openclaw agent --local`** | Runs a single agent turn in headless mode (no gateway needed) |
 | **GitHub Skill** | Built-in OpenClaw skill that teaches the agent to use `gh` CLI |
 | **Daily Developer Skill** | Custom workspace skill ([`skills/daily-developer/SKILL.md`](skills/daily-developer/SKILL.md)) guiding incremental improvements |
+| **`.openclaw/memory.md`** | Lightweight memory file committed to each target repo — gives the agent context across runs |
+
+### Multi-Repository Support
+
+| Scenario | Configuration |
+| --- | --- |
+| **Single repo** | `ALLOWED_REPOS = myuser/my-project` |
+| **Multiple repos (random)** | `ALLOWED_REPOS = myuser/repo-a, myuser/repo-b, myuser/repo-c` |
+| **Manual override** | Use the `repositories` input when triggering manually |
+| **Default (no config)** | Falls back to the repository this workflow lives in |
+
+When multiple repos are listed, each scheduled run randomly selects **one** repository. Over time every listed repo receives roughly equal attention.
+
+### Agent Memory
+
+Since GitHub Actions runners are ephemeral, the agent stores its memory as a compact markdown file (`.openclaw/memory.md`) committed directly to each target repository:
+
+```markdown
+# Memory
+2026-04-08: Created initial project structure with utils module
+2026-04-09: Added fibonacci function to utils
+2026-04-10: Wrote unit tests for utils.fibonacci
+```
+
+The agent reads this file at the start of each run and appends a one-line entry when done. If the file grows beyond ~80 lines, older entries are summarized to keep it token-friendly.
 
 ### Manual Trigger with Custom Task
 
-From the **Actions** tab, click **Run workflow** and optionally provide a custom task:
+From the **Actions** tab, click **Run workflow** and optionally provide:
 
-```
-Create a Python utility module with a function that generates Fibonacci numbers
-```
+- **Custom task**: e.g., `Create a Python utility module with a fibonacci function`
+- **Target repos**: override the target (e.g., `myuser/specific-repo`)
 
 ## Configuration
 
@@ -128,6 +174,8 @@ This experiment explores:
 - **Autonomous AI development**: Can an AI agent make meaningful incremental improvements to a codebase over time?
 - **Zero-cost AI infrastructure**: Running entirely on free-tier services (GitHub Actions + OpenRouter free models)
 - **Agent skill composition**: Using OpenClaw's skill system to guide autonomous behavior
+- **Stealth integration**: Commits use the real developer identity — the repository history looks organic
+- **Persistent memory without infrastructure**: A committed `.openclaw/memory.md` file gives the agent cross-run context with no external storage
 
 ## File Structure
 
@@ -140,6 +188,14 @@ This experiment explores:
 │   └── daily-developer/
 │       └── SKILL.md              # Custom OpenClaw skill for daily improvements
 └── README.md                     # This file
+```
+
+Each **target repository** will also gain:
+
+```
+<target-repo>/
+└── .openclaw/
+    └── memory.md                 # Agent memory (created on first run)
 ```
 
 ## References
