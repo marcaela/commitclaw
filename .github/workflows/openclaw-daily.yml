@@ -226,6 +226,7 @@ jobs:
           # --thinking low: minimal reasoning traces to conserve tokens on free models.
           # --timeout 300: 5-minute hard cap to stay within Actions runner limits.
           openclaw agent --local \
+            --agent main \
             --message "$TASK" \
             --thinking low \
             --timeout 300 \
