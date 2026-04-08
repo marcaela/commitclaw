@@ -203,28 +203,30 @@ jobs:
       - name: Verify GitHub CLI auth
         run: gh auth status
 
-      # ─── 6. Run the agent against the target repository ───
+      # ─── 6. Pre-seed memory file so the agent finds it reliably ───
+      - name: Ensure memory file exists
+        working-directory: ${{ env.WORKSPACE_DIR }}
+        run: |
+          MEMORY_FILE=".openclaw/memory.md"
+          if [ ! -f "$MEMORY_FILE" ]; then
+            mkdir -p "$(dirname "$MEMORY_FILE")"
+            echo "# Agent Memory" > "$MEMORY_FILE"
+            echo "" >> "$MEMORY_FILE"
+            echo "<!-- Append one line per session: YYYY-MM-DD: what you did -->" >> "$MEMORY_FILE"
+          fi
+
+      # ─── 7. Run the agent against the target repository ───
       - name: Run OpenClaw agent
         working-directory: ${{ env.WORKSPACE_DIR }}
         env:
           TARGET_REPO: ${{ steps.repo.outputs.selected }}
         run: |
           MEMORY_FILE=".openclaw/memory.md"
-          MEMORY_CONTEXT=""
-          if [ -f "$MEMORY_FILE" ]; then
-            MEMORY_CONTEXT="
-
+          MEMORY_CONTEXT="
           Your memory from previous sessions is in $MEMORY_FILE — read it first.
           When you are done, append a short note (date + what you did) to $MEMORY_FILE
           so future sessions know the history. Keep $MEMORY_FILE under 80 lines — if it
           grows too long, summarize older entries into a single line."
-          else
-            MEMORY_CONTEXT="
-
-          There is no memory file yet. After you make changes, create $MEMORY_FILE
-          with a one-line entry: today's date and a short note of what you did.
-          This file persists across runs so future sessions have context."
-          fi
 
           DEFAULT_TASK="You are a developer improving the repository ${TARGET_REPO} \
           with small daily commits. Examine the current files, recent git history, and \
@@ -232,7 +234,10 @@ jobs:
           docs, add a small feature, create a test, fix code style, or add configuration. \
           If the project is empty or new, create a simple useful codebase to build upon. \
           After making changes, commit with a clear message and push to the current \
-          branch. Keep changes minimal — use as few tokens as possible.${MEMORY_CONTEXT}"
+          branch. Keep changes minimal — use as few tokens as possible. \
+          IMPORTANT: Do NOT clone any repositories — you are already inside the target \
+          repo. Do NOT create directories named after GitHub owner/repo paths.
+          ${MEMORY_CONTEXT}"
 
           TASK="${{ inputs.task }}"
           TASK="${TASK:-$DEFAULT_TASK}"
@@ -255,12 +260,20 @@ jobs:
           cat /tmp/openclaw-output.json 2>/dev/null || echo "No output captured"
           echo "::endgroup::"
 
-      # ─── 7. Safety-net commit & push ───
+      # ─── 8. Safety-net commit & push ───
       - name: Push any uncommitted changes
         working-directory: ${{ env.WORKSPACE_DIR }}
         run: |
           if [ -n "$(git status --porcelain)" ]; then
             echo "Found uncommitted changes, committing…"
+
+            # The agent may have cloned repos inside the workspace, creating
+            # nested .git directories that break `git add -A`. Remove them.
+            find . -mindepth 2 -name .git -type d -prune -print | while read -r nested; do
+              echo "Removing nested git dir: $nested"
+              rm -rf "$nested"
+            done
+
             git add -A
             git commit -m "chore: daily improvement" || true
             git push || true
