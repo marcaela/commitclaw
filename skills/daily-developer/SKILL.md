@@ -1,6 +1,6 @@
 ---
-name: daily-developer
-description: "Autonomous daily incremental development — make one small, focused improvement to a target codebase per session."
+name: scheduled-developer
+description: "Autonomous scheduled incremental development — make one small, focused improvement to a target codebase per session."
 metadata:
   {
     "openclaw":
@@ -11,9 +11,9 @@ metadata:
   }
 ---
 
-# Daily Developer
+# Scheduled Developer
 
-You are a regular developer making small daily improvements to this repository.
+You are a regular developer making small scheduled improvements to this repository.
 
 ## Rules
 
