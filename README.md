@@ -70,7 +70,7 @@ If `ALLOWED_REPOS` is not set, the workflow falls back to the repository it live
 
 ### 6. Enable the Workflow
 
-The workflow is at [`.github/workflows/openclaw-daily.yml`](.github/workflows/openclaw-daily.yml). It runs automatically on schedule, or you can trigger it manually from the **Actions** tab.
+The workflow is at [`.github/workflows/openclaw-dev.yml`](.github/workflows/openclaw-dev.yml). It runs automatically on schedule, or you can trigger it manually from the **Actions** tab.
 
 ## How It Works
 
@@ -112,7 +112,7 @@ The workflow is at [`.github/workflows/openclaw-daily.yml`](.github/workflows/op
 | **[OpenRouter](https://openrouter.ai)** | Fallback model router with free-tier models ($0 cost) |
 | **`openclaw agent --local`** | Runs a single agent turn in headless mode (no gateway needed) |
 | **GitHub Skill** | Built-in OpenClaw skill that teaches the agent to use `gh` CLI |
-| **Daily Developer Skill** | Custom workspace skill ([`skills/daily-developer/SKILL.md`](skills/daily-developer/SKILL.md)) guiding incremental improvements |
+| **Scheduled Developer Skill** | Custom workspace skill ([`skills/scheduled-developer/SKILL.md`](skills/scheduled-developer/SKILL.md)) guiding incremental improvements |
 | **`.openclaw/memory.md`** | Lightweight memory file committed to each target repo — gives the agent context across runs |
 
 ### Multi-Repository Support
@@ -150,7 +150,7 @@ From the **Actions** tab, click **Run workflow** and optionally provide:
 
 ### Changing the Schedule
 
-Edit the cron expression in [`.github/workflows/openclaw-daily.yml`](.github/workflows/openclaw-daily.yml):
+Edit the cron expression in [`.github/workflows/openclaw-dev.yml`](.github/workflows/openclaw-dev.yml):
 
 ```yaml
 schedule:
@@ -180,7 +180,7 @@ See [Kilocode available models](https://kilo.ai/docs/gateway/models-and-provider
 
 ### Adjusting Agent Behavior
 
-Modify the custom skill in [`skills/daily-developer/SKILL.md`](skills/daily-developer/SKILL.md) to change what kind of improvements the agent makes.
+Modify the custom skill in [`skills/scheduled-developer/SKILL.md`](skills/scheduled-developer/SKILL.md) to change what kind of improvements the agent makes.
 
 ## Research Context
 
@@ -198,10 +198,10 @@ This experiment explores:
 .
 ├── .github/
 │   └── workflows/
-│       └── openclaw-daily.yml    # Scheduled GitHub Actions workflow
+│       └── openclaw-dev.yml    # Scheduled GitHub Actions workflow
 ├── skills/
-│   └── daily-developer/
-│       └── SKILL.md              # Custom OpenClaw skill for daily improvements
+│   └── scheduled-developer/
+│       └── SKILL.md              # Custom OpenClaw skill for scheduled improvements
 └── README.md                     # This file
 ```
 
