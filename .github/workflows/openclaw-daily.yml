@@ -113,7 +113,8 @@ jobs:
           echo "Cloning $REPO …"
           # Clone directly into the OpenClaw workspace directory so the agent
           # can see and modify the target repo files (fixes EISDIR workspace mismatch).
-          mkdir -p "$HOME/.openclaw"
+          # Ensure parent dir exists; git clone will populate the workspace dir.
+          mkdir -p "$(dirname "$WORKSPACE_DIR")"
           git clone --depth 20 \
             "https://x-access-token:${{ secrets.GH_PAT }}@github.com/${REPO}.git" \
             "$WORKSPACE_DIR"
