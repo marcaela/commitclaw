@@ -1,4 +1,4 @@
-name: OpenClaw Daily Developer
+name: OpenClaw Scheduled Developer
 
 # Research experiment: autonomous AI developer using OpenClaw + Kilocode free models
 # (with OpenRouter free as fallback).
@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "Custom task for the agent (leave empty for default daily improvement)"
+        description: "Custom task for the agent (leave empty for default small incremental improvement)"
         required: false
         type: string
       repositories:
@@ -36,7 +36,7 @@ permissions:
   contents: write
 
 jobs:
-  daily-develop:
+  scheduled-develop:
     runs-on: ubuntu-latest
     # timeout-minutes: 30
 
@@ -236,7 +236,7 @@ jobs:
           grows too long, summarize older entries into a single line."
 
           DEFAULT_TASK="You are a developer improving the repository ${TARGET_REPO} \
-          with small daily commits. Examine the current files, recent git history, and \
+          with small scheduled commits. Examine the current files, recent git history, and \
           make ONE small, meaningful improvement. Ideas: add a utility function, improve \
           docs, add a small feature, create a test, fix code style, or add configuration. \
           If the project is empty or new, create a simple useful codebase to build upon. \
@@ -286,7 +286,7 @@ jobs:
               done
 
               git add -A
-              git commit -m "chore: daily improvement" || true
+              git commit -m "chore: incremental improvement" || true
               git push || true
             fi
 
