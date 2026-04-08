@@ -1,29 +1,37 @@
 # claw 🦞
 
-**Research experiment**: an autonomous AI developer powered by [OpenClaw](https://github.com/openclaw/openclaw) running entirely free in GitHub Actions using [OpenRouter](https://openrouter.ai) free models.
+**Research experiment**: an autonomous AI developer powered by [OpenClaw](https://github.com/openclaw/openclaw) running entirely free in GitHub Actions using [Kilocode](https://kilo.ai) free models (with [OpenRouter](https://openrouter.ai) free as fallback).
 
 ## What This Does
 
 A GitHub Actions workflow runs **every 8 hours** (or on manual trigger) and:
 
 1. Installs [OpenClaw](https://docs.openclaw.ai) — an open-source personal AI assistant (Node.js/TypeScript)
-2. Discovers the best available **free** model on OpenRouter via `openclaw models scan`
-3. **Picks a target repository** from a configurable list (random selection when multiple are listed)
-4. Resolves the **real GitHub identity** of the PAT owner — commits look like normal developer activity
-5. Runs the OpenClaw agent in headless mode (`openclaw agent --local`) against the target repo
-6. The agent reads its **memory file** (`.openclaw/memory.md`), makes a small incremental improvement, updates memory, and commits + pushes
+2. Uses **[Kilocode](https://kilo.ai)** `kilo-auto/free` as the primary model — a smart-routing free tier managed by Kilo Gateway
+3. Falls back to **[OpenRouter](https://openrouter.ai)** free models if Kilocode is unavailable
+4. **Picks a target repository** from a configurable list (random selection when multiple are listed)
+5. Resolves the **real GitHub identity** of the PAT owner — commits look like normal developer activity
+6. Runs the OpenClaw agent in headless mode (`openclaw agent --local`) against the target repo
+7. The agent reads its **memory file** (`.openclaw/memory.md`), makes a small incremental improvement, updates memory, and commits + pushes
 
 Over time, the repositories evolve through small incremental changes — entirely autonomously and at zero cost.
 
 ## Setup
 
-### 1. Get an OpenRouter API Key (Free)
+### 1. Get a Kilocode API Key (Free — Primary Provider)
+
+1. Sign up at [kilo.ai](https://kilo.ai) (free)
+2. Go to [app.kilo.ai](https://app.kilo.ai) and navigate to **API Keys**
+3. Generate a new API key
+4. The `kilo-auto/free` model costs $0 — no credit card needed
+
+### 2. Get an OpenRouter API Key (Free — Fallback Provider)
 
 1. Sign up at [openrouter.ai](https://openrouter.ai) (free)
 2. Create an API key at [openrouter.ai/keys](https://openrouter.ai/keys)
 3. Free models cost $0 — no credit card needed
 
-### 2. Create a GitHub Personal Access Token
+### 3. Create a GitHub Personal Access Token
 
 1. Go to [GitHub Settings → Developer Settings → Personal Access Tokens → Fine-grained tokens](https://github.com/settings/tokens?type=beta)
 2. Create a new token with:
@@ -33,17 +41,18 @@ Over time, the repositories evolve through small incremental changes — entirel
 
 > **Note**: commits will use the **real username and email** of the token owner, so activity looks like normal developer work — not a bot.
 
-### 3. Add Repository Secrets
+### 4. Add Repository Secrets
 
 In **this** repository (where the workflow lives), go to **Settings → Secrets and variables → Actions** and add:
 
 | Type | Name | Value |
 | --- | --- | --- |
-| **Secret** | `OPENROUTER_API_KEY` | Your OpenRouter API key |
+| **Secret** | `KILOCODE_API_KEY` | Your Kilocode API key (primary provider) |
+| **Secret** | `OPENROUTER_API_KEY` | Your OpenRouter API key (fallback provider) |
 | **Secret** | `GH_PAT` | Your GitHub Personal Access Token |
 | **Variable** | `ALLOWED_REPOS` | Comma-separated `owner/repo` list (see below) |
 
-### 4. Configure Target Repositories
+### 5. Configure Target Repositories
 
 Set the **`ALLOWED_REPOS`** repository **variable** (Settings → Secrets and variables → Actions → Variables):
 
@@ -57,7 +66,7 @@ myuser/project-a, myuser/project-b, myuser/side-project
 
 If `ALLOWED_REPOS` is not set, the workflow falls back to the repository it lives in (`${{ github.repository }}`).
 
-### 5. Enable the Workflow
+### 6. Enable the Workflow
 
 The workflow is at [`.github/workflows/openclaw-daily.yml`](.github/workflows/openclaw-daily.yml). It runs automatically on schedule, or you can trigger it manually from the **Actions** tab.
 
@@ -74,7 +83,7 @@ The workflow is at [`.github/workflows/openclaw-daily.yml`](.github/workflows/op
 │  │ 1. Resolve PAT owner → real name + email             │  │
 │  │ 2. Pick target repo (random from ALLOWED_REPOS)      │  │
 │  │ 3. Clone target repo                                 │  │
-│  │ 4. Install OpenClaw, scan free models                │  │
+│  │ 4. Install OpenClaw, configure models                │  │
 │  │ 5. Run: openclaw agent --local                       │  │
 │  │    ├─ Read .openclaw/memory.md (prior context)       │  │
 │  │    ├─ Survey repo, plan improvement                  │  │
@@ -86,9 +95,10 @@ The workflow is at [`.github/workflows/openclaw-daily.yml`](.github/workflows/op
 │            Target repository updated                       │
 └───────────────────────────────────────────────────────────┘
                         │
-                        ▼
-               OpenRouter (free models)
-               e.g., Gemini, Llama, etc.
+            ┌───────────┴───────────┐
+            ▼                       ▼
+   Kilocode (primary)      OpenRouter (fallback)
+   kilo-auto/free           free models
 ```
 
 ### Key Components
@@ -96,8 +106,8 @@ The workflow is at [`.github/workflows/openclaw-daily.yml`](.github/workflows/op
 | Component | Role |
 | --- | --- |
 | **[OpenClaw](https://github.com/openclaw/openclaw)** | Open-source AI assistant framework with tool use, skills, and multi-provider model support |
-| **[OpenRouter](https://openrouter.ai)** | Model router with free-tier models ($0 cost) |
-| **`openclaw models scan`** | Discovers best available free models from OpenRouter's catalog |
+| **[Kilocode](https://kilo.ai)** | Primary model provider — `kilo-auto/free` smart-routes to the best free model ($0 cost) |
+| **[OpenRouter](https://openrouter.ai)** | Fallback model router with free-tier models ($0 cost) |
 | **`openclaw agent --local`** | Runs a single agent turn in headless mode (no gateway needed) |
 | **GitHub Skill** | Built-in OpenClaw skill that teaches the agent to use `gh` CLI |
 | **Daily Developer Skill** | Custom workspace skill ([`skills/daily-developer/SKILL.md`](skills/daily-developer/SKILL.md)) guiding incremental improvements |
@@ -147,21 +157,24 @@ schedule:
   # - cron: "0 9 * * 1-5"   # Weekdays only
 ```
 
-### Using a Specific Free Model
+### Using a Specific Model
 
-If you want to pin a specific model instead of auto-scanning, edit the `openclaw.json` config in the workflow:
+If you want to pin a specific model instead of `kilo-auto/free`, edit the `openclaw.json` config in the workflow:
 
 ```json
 {
   "agents": {
     "defaults": {
       "model": {
-        "primary": "openrouter/google/gemini-2.5-flash-preview:free"
+        "primary": "kilocode/anthropic/claude-sonnet-4",
+        "fallbacks": ["openrouter/google/gemini-2.5-flash-preview:free"]
       }
     }
   }
 }
 ```
+
+See [Kilocode available models](https://kilo.ai/docs/gateway/models-and-providers) and [OpenRouter free models](https://openrouter.ai/models?pricing=free) for options.
 
 ### Adjusting Agent Behavior
 
@@ -172,7 +185,7 @@ Modify the custom skill in [`skills/daily-developer/SKILL.md`](skills/daily-deve
 This experiment explores:
 
 - **Autonomous AI development**: Can an AI agent make meaningful incremental improvements to a codebase over time?
-- **Zero-cost AI infrastructure**: Running entirely on free-tier services (GitHub Actions + OpenRouter free models)
+- **Zero-cost AI infrastructure**: Running entirely on free-tier services (GitHub Actions + Kilocode free models + OpenRouter free fallback)
 - **Agent skill composition**: Using OpenClaw's skill system to guide autonomous behavior
 - **Stealth integration**: Commits use the real developer identity — the repository history looks organic
 - **Persistent memory without infrastructure**: A committed `.openclaw/memory.md` file gives the agent cross-run context with no external storage
@@ -203,6 +216,9 @@ Each **target repository** will also gain:
 - [OpenClaw](https://github.com/openclaw/openclaw) — Open-source AI assistant
 - [OpenClaw Docs](https://docs.openclaw.ai) — Full documentation
 - [OpenClaw Models](https://docs.openclaw.ai/concepts/models) — Model configuration
+- [OpenClaw Kilocode Provider](https://docs.openclaw.ai/providers/kilocode) — Kilocode provider setup
 - [OpenClaw Skills](https://docs.openclaw.ai/tools/skills) — Skill system
-- [OpenRouter](https://openrouter.ai) — Model router with free models
+- [Kilocode](https://kilo.ai) — Primary model provider with free-tier smart routing
+- [Kilocode Models](https://kilo.ai/docs/gateway/models-and-providers) — Available models and providers
+- [OpenRouter](https://openrouter.ai) — Fallback model router with free models
 - [OpenRouter Free Models](https://openrouter.ai/models?pricing=free) — Available free models
