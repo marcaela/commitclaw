@@ -1,0 +1,253 @@
+name: OpenClaw Daily Developer
+
+# Research experiment: autonomous AI developer using OpenClaw + OpenRouter free models.
+# Runs once per day and makes small incremental improvements to target repositories.
+#
+# ── Repository targeting ──
+#   Scheduled runs: uses ALLOWED_REPOS variable (comma-separated owner/repo list).
+#   Manual runs:    uses the "repositories" input, or falls back to ALLOWED_REPOS.
+#   When multiple repos are listed the workflow picks ONE at random per run.
+#
+# ── Git identity ──
+#   Commits use the real username + email of the GH_PAT owner so activity looks
+#   like normal developer work (not a bot).
+#
+# ── Agent memory ──
+#   The agent can read/write .openclaw/memory.md inside the target repo.
+#   That file is committed alongside code changes so memory persists across runs
+#   without external storage.
+
+on:
+  schedule:
+    - cron: "0 9 * * *" # Daily at 9:00 AM UTC
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Custom task for the agent (leave empty for default daily improvement)"
+        required: false
+        type: string
+      repositories:
+        description: "Target repos (comma-separated owner/repo). Leave empty to use ALLOWED_REPOS variable."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  daily-develop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      GH_TOKEN: ${{ secrets.GH_PAT }}
+      GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+
+    steps:
+      # ─── 1. Resolve the real identity of the PAT owner ───
+      - name: Resolve git identity from PAT owner
+        id: identity
+        run: |
+          # Fetch the authenticated user's profile via the GitHub API.
+          USER_JSON=$(gh api user 2>/dev/null || true)
+
+          GIT_NAME=$(echo "$USER_JSON"  | jq -r '.name  // .login // empty')
+          GIT_LOGIN=$(echo "$USER_JSON" | jq -r '.login // empty')
+          GIT_EMAIL=$(echo "$USER_JSON" | jq -r '.email // empty')
+
+          # GitHub may hide the email. Fall back to the noreply address.
+          if [ -z "$GIT_EMAIL" ] || [ "$GIT_EMAIL" = "null" ]; then
+            GIT_ID=$(echo "$USER_JSON" | jq -r '.id // empty')
+            GIT_EMAIL="${GIT_ID}+${GIT_LOGIN}@users.noreply.github.com"
+          fi
+
+          # Use login as name if name field is empty.
+          if [ -z "$GIT_NAME" ] || [ "$GIT_NAME" = "null" ]; then
+            GIT_NAME="$GIT_LOGIN"
+          fi
+
+          echo "name=$GIT_NAME"   >> "$GITHUB_OUTPUT"
+          echo "email=$GIT_EMAIL" >> "$GITHUB_OUTPUT"
+          echo "login=$GIT_LOGIN" >> "$GITHUB_OUTPUT"
+
+          echo "Resolved identity: $GIT_NAME <$GIT_EMAIL>"
+
+      # ─── 2. Pick target repository ───
+      - name: Select target repository
+        id: repo
+        run: |
+          # Priority: workflow_dispatch input > ALLOWED_REPOS variable > current repo.
+          INPUT_REPOS="${{ inputs.repositories }}"
+          ALLOWED="${{ vars.ALLOWED_REPOS }}"
+          CURRENT="${{ github.repository }}"
+
+          RAW="${INPUT_REPOS:-${ALLOWED:-$CURRENT}}"
+
+          # Trim spaces, split on commas, remove blanks.
+          IFS=',' read -ra REPOS <<< "$RAW"
+          CLEAN=()
+          for r in "${REPOS[@]}"; do
+            r="$(echo "$r" | xargs)"          # trim whitespace
+            [ -n "$r" ] && CLEAN+=("$r")
+          done
+
+          if [ "${#CLEAN[@]}" -eq 0 ]; then
+            echo "::error::No repositories configured. Set ALLOWED_REPOS variable or provide input."
+            exit 1
+          fi
+
+          # Randomly select one repository from the list.
+          INDEX=$(( RANDOM % ${#CLEAN[@]} ))
+          SELECTED="${CLEAN[$INDEX]}"
+
+          echo "selected=$SELECTED"           >> "$GITHUB_OUTPUT"
+          echo "total=${#CLEAN[@]}"           >> "$GITHUB_OUTPUT"
+          echo "Selected repo: $SELECTED (from ${#CLEAN[@]} candidates)"
+
+      # ─── 3. Clone the target repository ───
+      - name: Clone target repository
+        run: |
+          REPO="${{ steps.repo.outputs.selected }}"
+          echo "Cloning $REPO …"
+          # depth=20 gives the agent enough recent history to understand the
+          # project trajectory without pulling the entire commit graph.
+          git clone --depth 20 \
+            "https://x-access-token:${{ secrets.GH_PAT }}@github.com/${REPO}.git" \
+            /tmp/target-repo
+
+      - name: Configure git identity on target repo
+        working-directory: /tmp/target-repo
+        run: |
+          git config user.name  "${{ steps.identity.outputs.name }}"
+          git config user.email "${{ steps.identity.outputs.email }}"
+
+      # ─── 4. Checkout this repo for skills / workflow reference ───
+      - name: Checkout claw repo (for skills)
+        uses: actions/checkout@v4
+        with:
+          path: claw-home
+
+      # ─── 5. Toolchain ───
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install OpenClaw
+        run: npm install -g openclaw@latest
+
+      - name: Configure OpenClaw for headless CI
+        run: |
+          mkdir -p ~/.openclaw
+
+          # Point OpenClaw at the target repo as its workspace, and load
+          # our custom skills from the claw-home checkout.
+          cat > ~/.openclaw/openclaw.json << OCEOF
+          {
+            "gateway": {
+              "mode": "local"
+            },
+            "agents": {
+              "defaults": {
+                "model": {
+                  "primary": "openrouter/auto"
+                }
+              }
+            },
+            "skills": {
+              "load": {
+                "extraDirs": ["${{ github.workspace }}/claw-home/skills"]
+              }
+            }
+          }
+          OCEOF
+
+      - name: Discover and set best free model
+        # openclaw models scan inspects OpenRouter's free model catalog.
+        # --set-default sets the best candidate as the primary model.
+        # --no-probe skips live latency probes (faster in CI).
+        # --yes accepts defaults non-interactively.
+        run: |
+          echo "::group::Scanning OpenRouter free models"
+          openclaw models scan \
+            --set-default \
+            --no-probe \
+            --yes \
+            2>&1 || echo "::warning::Free model scan failed; falling back to openrouter/auto"
+          echo "::endgroup::"
+
+          echo "::group::Active model configuration"
+          openclaw models status 2>&1 || true
+          echo "::endgroup::"
+
+      - name: Verify GitHub CLI auth
+        run: gh auth status
+
+      # ─── 6. Run the agent against the target repository ───
+      - name: Run OpenClaw agent
+        working-directory: /tmp/target-repo
+        env:
+          TARGET_REPO: ${{ steps.repo.outputs.selected }}
+        run: |
+          MEMORY_FILE=".openclaw/memory.md"
+          MEMORY_CONTEXT=""
+          if [ -f "$MEMORY_FILE" ]; then
+            MEMORY_CONTEXT="
+
+          Your memory from previous sessions is in $MEMORY_FILE — read it first.
+          When you are done, append a short note (date + what you did) to $MEMORY_FILE
+          so future sessions know the history. Keep $MEMORY_FILE under 80 lines — if it
+          grows too long, summarize older entries into a single line."
+          else
+            MEMORY_CONTEXT="
+
+          There is no memory file yet. After you make changes, create $MEMORY_FILE
+          with a one-line entry: today's date and a short note of what you did.
+          This file persists across runs so future sessions have context."
+          fi
+
+          DEFAULT_TASK="You are a developer improving the repository ${TARGET_REPO} \
+          with small daily commits. Examine the current files, recent git history, and \
+          make ONE small, meaningful improvement. Ideas: add a utility function, improve \
+          docs, add a small feature, create a test, fix code style, or add configuration. \
+          If the project is empty or new, create a simple useful codebase to build upon. \
+          After making changes, commit with a clear message and push to the current \
+          branch. Keep changes minimal — use as few tokens as possible.${MEMORY_CONTEXT}"
+
+          TASK="${{ inputs.task }}"
+          TASK="${TASK:-$DEFAULT_TASK}"
+
+          echo "::group::Agent task"
+          echo "$TASK"
+          echo "::endgroup::"
+
+          # Run the agent in local embedded mode (no gateway needed).
+          # --thinking low: minimal reasoning traces to conserve tokens on free models.
+          # --timeout 300: 5-minute hard cap to stay within Actions runner limits.
+          openclaw agent --local \
+            --message "$TASK" \
+            --thinking low \
+            --timeout 300 \
+            --json 2>&1 | tee /tmp/openclaw-output.json || true
+
+          echo "::group::Agent output"
+          cat /tmp/openclaw-output.json 2>/dev/null || echo "No output captured"
+          echo "::endgroup::"
+
+      # ─── 7. Safety-net commit & push ───
+      - name: Push any uncommitted changes
+        working-directory: /tmp/target-repo
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Found uncommitted changes, committing…"
+            git add -A
+            git commit -m "chore: daily improvement" || true
+            git push || true
+          else
+            echo "No uncommitted changes found."
+          fi
+
+          echo "::group::Recent commits"
+          git --no-pager log --oneline -5
+          echo "::endgroup::"
