@@ -151,7 +151,7 @@ jobs:
             "agents": {
               "defaults": {
                 "model": {
-                  "primary": "openrouter/auto"
+                  "primary": "openrouter/free"
                 }
               }
             },
@@ -174,7 +174,7 @@ jobs:
             --set-default \
             --no-probe \
             --yes \
-            2>&1 || echo "::warning::Free model scan failed; falling back to openrouter/auto"
+            2>&1 || echo "::warning::Free model scan failed; falling back to openrouter/free"
           echo "::endgroup::"
 
           echo "::group::Active model configuration"
