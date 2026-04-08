@@ -43,6 +43,7 @@ jobs:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       GH_TOKEN: ${{ secrets.GH_PAT }}
       GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+      WORKSPACE_DIR: /home/runner/.openclaw/workspace
 
     steps:
       # ─── 1. Resolve the real identity of the PAT owner ───
@@ -105,24 +106,41 @@ jobs:
           echo "total=${#CLEAN[@]}"           >> "$GITHUB_OUTPUT"
           echo "Selected repo: $SELECTED (from ${#CLEAN[@]} candidates)"
 
-      # ─── 3. Clone the target repository ───
+      # ─── 3. Clone the target repository into the OpenClaw workspace ───
       - name: Clone target repository
         run: |
           REPO="${{ steps.repo.outputs.selected }}"
           echo "Cloning $REPO …"
-          # depth=20 gives the agent enough recent history to understand the
-          # project trajectory without pulling the entire commit graph.
+          # Clone directly into the OpenClaw workspace directory so the agent
+          # can see and modify the target repo files (fixes EISDIR workspace mismatch).
+          mkdir -p "$HOME/.openclaw"
           git clone --depth 20 \
             "https://x-access-token:${{ secrets.GH_PAT }}@github.com/${REPO}.git" \
-            /tmp/target-repo
+            "$WORKSPACE_DIR"
 
       - name: Configure git identity on target repo
-        working-directory: /tmp/target-repo
+        working-directory: ${{ env.WORKSPACE_DIR }}
         run: |
           git config user.name  "${{ steps.identity.outputs.name }}"
           git config user.email "${{ steps.identity.outputs.email }}"
 
       # ─── 4. Checkout this repo for skills / workflow reference ───
+      - name: Exclude OpenClaw scaffold files from git tracking
+        working-directory: ${{ env.WORKSPACE_DIR }}
+        run: |
+          # OpenClaw creates workspace scaffold files (AGENTS.md, SOUL.md, etc.)
+          # that must not be committed to the target repo. Use .git/info/exclude
+          # (a local-only gitignore) to keep them out of git add / commit.
+          cat >> .git/info/exclude << 'EOF'
+          AGENTS.md
+          SOUL.md
+          TOOLS.md
+          IDENTITY.md
+          USER.md
+          HEARTBEAT.md
+          BOOTSTRAP.md
+          EOF
+
       - name: Checkout claw repo (for skills)
         uses: actions/checkout@v4
         with:
@@ -186,7 +204,7 @@ jobs:
 
       # ─── 6. Run the agent against the target repository ───
       - name: Run OpenClaw agent
-        working-directory: /tmp/target-repo
+        working-directory: ${{ env.WORKSPACE_DIR }}
         env:
           TARGET_REPO: ${{ steps.repo.outputs.selected }}
         run: |
@@ -238,7 +256,7 @@ jobs:
 
       # ─── 7. Safety-net commit & push ───
       - name: Push any uncommitted changes
-        working-directory: /tmp/target-repo
+        working-directory: ${{ env.WORKSPACE_DIR }}
         run: |
           if [ -n "$(git status --porcelain)" ]; then
             echo "Found uncommitted changes, committing…"
