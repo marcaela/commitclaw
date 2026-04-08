@@ -37,7 +37,7 @@ permissions:
 jobs:
   daily-develop:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -215,11 +215,12 @@ jobs:
             echo "<!-- Append one line per session: YYYY-MM-DD: what you did -->" >> "$MEMORY_FILE"
           fi
 
-      # ─── 7. Run the agent against the target repository ───
-      - name: Run OpenClaw agent
+      # ─── 7. Run the agent (with retry loop until a commit is produced) ───
+      - name: Run OpenClaw agent (retry until commit)
         working-directory: ${{ env.WORKSPACE_DIR }}
         env:
           TARGET_REPO: ${{ steps.repo.outputs.selected }}
+          MAX_ATTEMPTS: "3"
         run: |
           MEMORY_FILE=".openclaw/memory.md"
           MEMORY_CONTEXT="
@@ -246,40 +247,56 @@ jobs:
           echo "$TASK"
           echo "::endgroup::"
 
-          # Run the agent in local embedded mode (no gateway needed).
-          # --thinking low: minimal reasoning traces to conserve tokens on free models.
-          # --timeout 300: 5-minute hard cap to stay within Actions runner limits.
-          openclaw agent --local \
-            --agent main \
-            --message "$TASK" \
-            --thinking low \
-            --timeout 300 \
-            --json 2>&1 | tee /tmp/openclaw-output.json || true
+          # Record the HEAD SHA before any attempt so we can detect new commits.
+          BEFORE_SHA=$(git rev-parse HEAD)
+          echo "HEAD before agent: $BEFORE_SHA"
 
-          echo "::group::Agent output"
-          cat /tmp/openclaw-output.json 2>/dev/null || echo "No output captured"
-          echo "::endgroup::"
+          for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
+            echo ""
+            echo "════════════════════════════════════════"
+            echo "  Attempt $ATTEMPT / $MAX_ATTEMPTS"
+            echo "════════════════════════════════════════"
 
-      # ─── 8. Safety-net commit & push ───
-      - name: Push any uncommitted changes
-        working-directory: ${{ env.WORKSPACE_DIR }}
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "Found uncommitted changes, committing…"
+            # ── Run the agent ──
+            openclaw agent --local \
+              --agent main \
+              --message "$TASK" \
+              --thinking low \
+              --timeout 300 \
+              --json 2>&1 | tee /tmp/openclaw-output.json || true
 
-            # The agent may have cloned repos inside the workspace, creating
-            # nested .git directories that break `git add -A`. Remove them.
-            find . -mindepth 2 -name .git -type d -prune -print | while read -r nested; do
-              echo "Removing nested git dir: $nested"
-              rm -rf "$nested"
-            done
+            echo "::group::Agent output (attempt $ATTEMPT)"
+            cat /tmp/openclaw-output.json 2>/dev/null || echo "No output captured"
+            echo "::endgroup::"
 
-            git add -A
-            git commit -m "chore: daily improvement" || true
-            git push || true
-          else
-            echo "No uncommitted changes found."
-          fi
+            # ── Safety-net: commit any uncommitted changes the agent left behind ──
+            if [ -n "$(git status --porcelain)" ]; then
+              echo "Found uncommitted changes, committing…"
+
+              # Remove nested .git dirs the agent may have created.
+              find . -mindepth 2 -name .git -type d -prune -print | while read -r nested; do
+                echo "Removing nested git dir: $nested"
+                rm -rf "$nested"
+              done
+
+              git add -A
+              git commit -m "chore: daily improvement" || true
+              git push || true
+            fi
+
+            # ── Check if a new commit was produced ──
+            AFTER_SHA=$(git rev-parse HEAD)
+            if [ "$AFTER_SHA" != "$BEFORE_SHA" ]; then
+              echo "✅ New commit detected ($AFTER_SHA). Done."
+              break
+            fi
+
+            if [ "$ATTEMPT" -eq "$MAX_ATTEMPTS" ]; then
+              echo "⚠️  No new commit after $MAX_ATTEMPTS attempts. Giving up."
+            else
+              echo "⏳ No new commit yet. Retrying…"
+            fi
+          done
 
           echo "::group::Recent commits"
           git --no-pager log --oneline -5
