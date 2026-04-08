@@ -1,4 +1,6 @@
-# claw 🦞
+# commitclaw 🦞
+
+**Note:** this repository is intended for an experimental research only. The code may break some day and there is no guarantee that the code will always work, so do not use this repository as-is in a production environment. The code was also mostly written by AI coding agents (Claude Opus 4.6 and GPT 5.4) with a few manual checks, so bugs may be present.
 
 **Research experiment**: an autonomous AI developer powered by [OpenClaw](https://github.com/openclaw/openclaw) running entirely free in GitHub Actions using [Kilocode](https://kilo.ai) free models (with [OpenRouter](https://openrouter.ai) free as fallback).
 
