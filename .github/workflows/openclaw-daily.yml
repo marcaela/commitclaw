@@ -110,6 +110,8 @@ jobs:
         run: |
           REPO="${{ steps.repo.outputs.selected }}"
           echo "Cloning $REPO …"
+          # depth=20 gives the agent enough recent history to understand the
+          # project trajectory without pulling the entire commit graph.
           git clone --depth 20 \
             "https://x-access-token:${{ secrets.GH_PAT }}@github.com/${REPO}.git" \
             /tmp/target-repo
