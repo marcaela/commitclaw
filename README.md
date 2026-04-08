@@ -4,7 +4,7 @@
 
 ## What This Does
 
-A GitHub Actions workflow runs **once per day** (or on manual trigger) and:
+A GitHub Actions workflow runs **every 8 hours** (or on manual trigger) and:
 
 1. Installs [OpenClaw](https://docs.openclaw.ai) — an open-source personal AI assistant (Node.js/TypeScript)
 2. Discovers the best available **free** model on OpenRouter via `openclaw models scan`
@@ -13,7 +13,7 @@ A GitHub Actions workflow runs **once per day** (or on manual trigger) and:
 5. Runs the OpenClaw agent in headless mode (`openclaw agent --local`) against the target repo
 6. The agent reads its **memory file** (`.openclaw/memory.md`), makes a small incremental improvement, updates memory, and commits + pushes
 
-Over time, the repositories evolve through small daily changes — entirely autonomously and at zero cost.
+Over time, the repositories evolve through small incremental changes — entirely autonomously and at zero cost.
 
 ## Setup
 
@@ -67,7 +67,7 @@ The workflow is at [`.github/workflows/openclaw-daily.yml`](.github/workflows/op
 ┌───────────────────────────────────────────────────────────┐
 │                     GitHub Actions                         │
 │                                                            │
-│  schedule (daily 9 AM UTC) or manual trigger               │
+│  schedule (every 8 hours) or manual trigger                │
 │       │                                                    │
 │       ▼                                                    │
 │  ┌──────────────────────────────────────────────────────┐  │
@@ -142,7 +142,7 @@ Edit the cron expression in [`.github/workflows/openclaw-daily.yml`](.github/wor
 
 ```yaml
 schedule:
-  - cron: "0 9 * * *"   # Daily at 9 AM UTC
+  - cron: "0 */8 * * *"  # Every 8 hours
   # - cron: "0 */12 * * *"  # Every 12 hours
   # - cron: "0 9 * * 1-5"   # Weekdays only
 ```

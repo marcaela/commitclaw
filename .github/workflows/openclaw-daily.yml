@@ -1,7 +1,7 @@
 name: OpenClaw Daily Developer
 
 # Research experiment: autonomous AI developer using OpenClaw + OpenRouter free models.
-# Runs once per day and makes small incremental improvements to target repositories.
+# Runs every 8 hours and makes small incremental improvements to target repositories.
 #
 # ── Repository targeting ──
 #   Scheduled runs: uses ALLOWED_REPOS variable (comma-separated owner/repo list).
@@ -19,7 +19,7 @@ name: OpenClaw Daily Developer
 
 on:
   schedule:
-    - cron: "0 9 * * *" # Daily at 9:00 AM UTC
+    - cron: "0 */8 * * *" # Every 8 hours
   workflow_dispatch:
     inputs:
       task:
