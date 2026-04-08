@@ -1,6 +1,7 @@
 name: OpenClaw Daily Developer
 
-# Research experiment: autonomous AI developer using OpenClaw + OpenRouter free models.
+# Research experiment: autonomous AI developer using OpenClaw + Kilocode free models
+# (with OpenRouter free as fallback).
 # Runs every 8 hours and makes small incremental improvements to target repositories.
 #
 # ── Repository targeting ──
@@ -40,6 +41,7 @@ jobs:
     # timeout-minutes: 30
 
     env:
+      KILOCODE_API_KEY: ${{ secrets.KILOCODE_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       GH_TOKEN: ${{ secrets.GH_PAT }}
       GITHUB_TOKEN: ${{ secrets.GH_PAT }}
@@ -162,6 +164,8 @@ jobs:
 
           # Point OpenClaw at the target repo as its workspace, and load
           # our custom skills from the claw-home checkout.
+          # Primary: Kilocode kilo-auto/free (zero-cost smart routing)
+          # Fallback: OpenRouter free router model
           cat > ~/.openclaw/openclaw.json << OCEOF
           {
             "gateway": {
@@ -170,7 +174,8 @@ jobs:
             "agents": {
               "defaults": {
                 "model": {
-                  "primary": "openrouter/free"
+                  "primary": "kilocode/kilo-auto/free",
+                  "fallbacks": ["openrouter/free"]
                 }
               }
             },
@@ -182,18 +187,19 @@ jobs:
           }
           OCEOF
 
-      - name: Discover and set best free model
+      - name: Discover OpenRouter free models (fallback catalog)
         # openclaw models scan inspects OpenRouter's free model catalog.
-        # --set-default sets the best candidate as the primary model.
         # --no-probe skips live latency probes (faster in CI).
         # --yes accepts defaults non-interactively.
+        # NOTE: We do NOT use --set-default here because the primary model
+        # is kilocode/kilo-auto/free (set in openclaw.json). This scan only
+        # refreshes the free-model catalog so OpenRouter fallback works well.
         run: |
-          echo "::group::Scanning OpenRouter free models"
+          echo "::group::Scanning OpenRouter free models (fallback catalog)"
           openclaw models scan \
-            --set-default \
             --no-probe \
             --yes \
-            2>&1 || echo "::warning::Free model scan failed; falling back to openrouter/free"
+            2>&1 || echo "::warning::Free model scan failed; openrouter/free fallback still configured"
           echo "::endgroup::"
 
           echo "::group::Active model configuration"
