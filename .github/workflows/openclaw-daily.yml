@@ -108,7 +108,9 @@ jobs:
           echo "$TASK"
           echo "::endgroup::"
 
-          # Run the agent in local embedded mode (no gateway needed)
+          # Run the agent in local embedded mode (no gateway needed).
+          # --thinking low: minimal reasoning traces to conserve tokens on free models.
+          # --timeout 300: 5-minute hard cap to stay within Actions runner limits.
           openclaw agent --local \
             --message "$TASK" \
             --thinking low \
