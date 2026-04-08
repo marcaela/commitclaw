@@ -37,7 +37,7 @@ permissions:
 jobs:
   daily-develop:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -203,28 +203,31 @@ jobs:
       - name: Verify GitHub CLI auth
         run: gh auth status
 
-      # ─── 6. Run the agent against the target repository ───
-      - name: Run OpenClaw agent
+      # ─── 6. Pre-seed memory file so the agent finds it reliably ───
+      - name: Ensure memory file exists
+        working-directory: ${{ env.WORKSPACE_DIR }}
+        run: |
+          MEMORY_FILE=".openclaw/memory.md"
+          if [ ! -f "$MEMORY_FILE" ]; then
+            mkdir -p "$(dirname "$MEMORY_FILE")"
+            echo "# Agent Memory" > "$MEMORY_FILE"
+            echo "" >> "$MEMORY_FILE"
+            echo "<!-- Append one line per session: YYYY-MM-DD: what you did -->" >> "$MEMORY_FILE"
+          fi
+
+      # ─── 7. Run the agent (with retry loop until a commit is produced) ───
+      - name: Run OpenClaw agent (retry until commit)
         working-directory: ${{ env.WORKSPACE_DIR }}
         env:
           TARGET_REPO: ${{ steps.repo.outputs.selected }}
+          MAX_ATTEMPTS: "3"
         run: |
           MEMORY_FILE=".openclaw/memory.md"
-          MEMORY_CONTEXT=""
-          if [ -f "$MEMORY_FILE" ]; then
-            MEMORY_CONTEXT="
-
+          MEMORY_CONTEXT="
           Your memory from previous sessions is in $MEMORY_FILE — read it first.
           When you are done, append a short note (date + what you did) to $MEMORY_FILE
           so future sessions know the history. Keep $MEMORY_FILE under 80 lines — if it
           grows too long, summarize older entries into a single line."
-          else
-            MEMORY_CONTEXT="
-
-          There is no memory file yet. After you make changes, create $MEMORY_FILE
-          with a one-line entry: today's date and a short note of what you did.
-          This file persists across runs so future sessions have context."
-          fi
 
           DEFAULT_TASK="You are a developer improving the repository ${TARGET_REPO} \
           with small daily commits. Examine the current files, recent git history, and \
@@ -232,7 +235,10 @@ jobs:
           docs, add a small feature, create a test, fix code style, or add configuration. \
           If the project is empty or new, create a simple useful codebase to build upon. \
           After making changes, commit with a clear message and push to the current \
-          branch. Keep changes minimal — use as few tokens as possible.${MEMORY_CONTEXT}"
+          branch. Keep changes minimal — use as few tokens as possible. \
+          IMPORTANT: Do NOT clone any repositories — you are already inside the target \
+          repo. Do NOT create directories named after GitHub owner/repo paths.
+          ${MEMORY_CONTEXT}"
 
           TASK="${{ inputs.task }}"
           TASK="${TASK:-$DEFAULT_TASK}"
@@ -241,32 +247,56 @@ jobs:
           echo "$TASK"
           echo "::endgroup::"
 
-          # Run the agent in local embedded mode (no gateway needed).
-          # --thinking low: minimal reasoning traces to conserve tokens on free models.
-          # --timeout 300: 5-minute hard cap to stay within Actions runner limits.
-          openclaw agent --local \
-            --agent main \
-            --message "$TASK" \
-            --thinking low \
-            --timeout 300 \
-            --json 2>&1 | tee /tmp/openclaw-output.json || true
+          # Record the HEAD SHA before any attempt so we can detect new commits.
+          BEFORE_SHA=$(git rev-parse HEAD)
+          echo "HEAD before agent: $BEFORE_SHA"
 
-          echo "::group::Agent output"
-          cat /tmp/openclaw-output.json 2>/dev/null || echo "No output captured"
-          echo "::endgroup::"
+          for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
+            echo ""
+            echo "════════════════════════════════════════"
+            echo "  Attempt $ATTEMPT / $MAX_ATTEMPTS"
+            echo "════════════════════════════════════════"
 
-      # ─── 7. Safety-net commit & push ───
-      - name: Push any uncommitted changes
-        working-directory: ${{ env.WORKSPACE_DIR }}
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "Found uncommitted changes, committing…"
-            git add -A
-            git commit -m "chore: daily improvement" || true
-            git push || true
-          else
-            echo "No uncommitted changes found."
-          fi
+            # ── Run the agent ──
+            openclaw agent --local \
+              --agent main \
+              --message "$TASK" \
+              --thinking low \
+              --timeout 300 \
+              --json 2>&1 | tee /tmp/openclaw-output.json || true
+
+            echo "::group::Agent output (attempt $ATTEMPT)"
+            cat /tmp/openclaw-output.json 2>/dev/null || echo "No output captured"
+            echo "::endgroup::"
+
+            # ── Safety-net: commit any uncommitted changes the agent left behind ──
+            if [ -n "$(git status --porcelain)" ]; then
+              echo "Found uncommitted changes, committing…"
+
+              # Remove nested .git dirs the agent may have created.
+              find . -mindepth 2 -name .git -type d -prune -print | while read -r nested; do
+                echo "Removing nested git dir: $nested"
+                rm -rf "$nested"
+              done
+
+              git add -A
+              git commit -m "chore: daily improvement" || true
+              git push || true
+            fi
+
+            # ── Check if a new commit was produced ──
+            AFTER_SHA=$(git rev-parse HEAD)
+            if [ "$AFTER_SHA" != "$BEFORE_SHA" ]; then
+              echo "✅ New commit detected ($AFTER_SHA). Done."
+              break
+            fi
+
+            if [ "$ATTEMPT" -eq "$MAX_ATTEMPTS" ]; then
+              echo "⚠️  No new commit after $MAX_ATTEMPTS attempts. Giving up."
+            else
+              echo "⏳ No new commit yet. Retrying…"
+            fi
+          done
 
           echo "::group::Recent commits"
           git --no-pager log --oneline -5
